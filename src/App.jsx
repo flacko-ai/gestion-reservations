@@ -1,4 +1,22 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, onValue, set as fbSet } from "firebase/database";
+
+// ═══════════════════════════════════════════
+// 🔥 FIREBASE CONFIG — remplace avec tes propres valeurs
+// ═══════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyA5CVYR_QEIFZTvHItVPMn0QijIb6mzfRM",
+  authDomain: "gestion-reservations-da21a.firebaseapp.com",
+  databaseURL: "https://gestion-reservations-da21a-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "gestion-reservations-da21a",
+  storageBucket: "gestion-reservations-da21a.firebasestorage.app",
+  messagingSenderId: "714219227815",
+  appId: "1:714219227815:web:731785a3b9c0dd75c0e982"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
 const MONTHS_FR = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 const DAYS_FR = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
@@ -33,14 +51,8 @@ function getFirstDayOfMonth(year, month) {
   return d === 0 ? 6 : d - 1;
 }
 
-function loadData(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch { return fallback; }
-}
-function saveData(key, data) {
-  try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) { console.error(e); }
+function saveToFirebase(key, data) {
+  fbSet(ref(db, key), data).catch(e => console.error("Firebase write error:", e));
 }
 
 /* ═══════════════════════════════════════════
@@ -77,8 +89,8 @@ const selectStyle = {
    MAIN APP
    ═══════════════════════════════════════════ */
 export default function App() {
-  const [apts, setApts] = useState(() => loadData("resa-apts", DEFAULT_APTS));
-  const [reservations, setReservations] = useState(() => loadData("resa-bookings", []));
+  const [apts, setApts] = useState(DEFAULT_APTS);
+  const [reservations, setReservations] = useState([]);
   const [view, setView] = useState("calendar");
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
@@ -88,9 +100,35 @@ export default function App() {
   const [filterApt, setFilterApt] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [selectedDay, setSelectedDay] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const skipSync = useRef({ apts: true, bookings: true });
 
-  useEffect(() => { saveData("resa-apts", apts); }, [apts]);
-  useEffect(() => { saveData("resa-bookings", reservations); }, [reservations]);
+  // Listen to Firebase in realtime
+  useEffect(() => {
+    const aptsRef = ref(db, "apts");
+    const bookingsRef = ref(db, "bookings");
+    const unsub1 = onValue(aptsRef, (snap) => {
+      const val = snap.val();
+      if (val) { skipSync.current.apts = true; setApts(val); }
+      setLoaded(true);
+    });
+    const unsub2 = onValue(bookingsRef, (snap) => {
+      const val = snap.val();
+      skipSync.current.bookings = true;
+      setReservations(val || []);
+    });
+    return () => { unsub1(); unsub2(); };
+  }, []);
+
+  // Save to Firebase when state changes (skip if change came from Firebase)
+  useEffect(() => {
+    if (skipSync.current.apts) { skipSync.current.apts = false; return; }
+    saveToFirebase("apts", apts);
+  }, [apts]);
+  useEffect(() => {
+    if (skipSync.current.bookings) { skipSync.current.bookings = false; return; }
+    saveToFirebase("bookings", reservations);
+  }, [reservations]);
 
   const addReservation = (r) => {
     if (editingRes) {
@@ -124,6 +162,11 @@ export default function App() {
     <div style={{ fontFamily:"'DM Sans', sans-serif", background:"#FAFAF8", minHeight:"100vh", color:"#2D2D2D" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
 
+      {!loaded ? (
+        <div style={{ display:"flex", justifyContent:"center", alignItems:"center", height:"100vh", fontSize:15, color:"#999" }}>
+          Chargement...
+        </div>
+      ) : (<>
       {/* ── Header ── */}
       <header style={{ background:"linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)", padding:"20px 24px", color:"#fff" }}>
         <div style={{ maxWidth:1100, margin:"0 auto" }}>
@@ -202,6 +245,7 @@ export default function App() {
           <AptForm onSubmit={addApt} onCancel={() => setShowAptForm(false)} />
         </Modal>
       )}
+      </>)}
     </div>
   );
 }
