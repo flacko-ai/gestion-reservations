@@ -153,6 +153,7 @@ export default function App() {
   const activeRes = reservations.filter(r => r.checkin <= now && r.checkout > now);
   const upcomingRes = reservations.filter(r => r.checkin > now && r.status !== "Annulée");
   const pendingPayments = reservations.filter(r => r.status === "En attente" || r.status === "Acompte reçu");
+  const totalRemaining = reservations.filter(r => r.status !== "Annulée").reduce((s, r) => s + Math.max(0, (Number(r.price) || 0) - (Number(r.deposit) || 0)), 0);
   const thisMonthRevenue = reservations.filter(r => {
     const d = parseDate(r.checkin);
     return d.getMonth() === new Date().getMonth() && d.getFullYear() === new Date().getFullYear() && r.status !== "Annulée";
@@ -187,7 +188,7 @@ export default function App() {
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:10, marginTop:16 }}>
             <StatCard label="En cours" value={activeRes.length} icon="🔑" />
             <StatCard label="À venir" value={upcomingRes.length} icon="📅" />
-            <StatCard label="Paiements en attente" value={pendingPayments.length} icon="⏳" />
+            <StatCard label="Reste à encaisser" value={`${totalRemaining.toLocaleString("fr-FR")} €`} icon="⚠️" />
             <StatCard label="Revenu ce mois" value={`${thisMonthRevenue.toLocaleString("fr-FR")} €`} icon="💰" />
           </div>
         </div>
@@ -361,8 +362,17 @@ function ResCard({ r, apts, onEdit, onDelete, onStatusChange, showStatus }) {
           <SourceBadge source={r.source} />
         </div>
       </div>
-      <div style={{ display:"flex", gap:16, fontSize:12, color:"#666", flexWrap:"wrap" }}>
+      <div style={{ display:"flex", gap:16, fontSize:12, color:"#666", flexWrap:"wrap", alignItems:"center" }}>
         <span>💰 {Number(r.price || 0).toLocaleString("fr-FR")} €</span>
+        {Number(r.deposit) > 0 && <span>🔻 Acompte: {Number(r.deposit).toLocaleString("fr-FR")} €</span>}
+        {Number(r.price) > 0 && (() => {
+          const reste = Number(r.price) - Number(r.deposit || 0);
+          return reste > 0 ? (
+            <span style={{ color:"#dc2626", fontWeight:600 }}>⚠️ Reste: {reste.toLocaleString("fr-FR")} €</span>
+          ) : (
+            <span style={{ color:"#16a34a", fontWeight:600 }}>✅ Soldé</span>
+          );
+        })()}
         <span>💳 {r.payment}</span>
         {r.phone && <span>📞 {r.phone}</span>}
         {r.guests && <span>👥 {r.guests} pers.</span>}
@@ -425,7 +435,7 @@ function AptsView({ apts, reservations, onDelete }) {
 function ReservationForm({ apts, onSubmit, initial, onCancel }) {
   const [form, setForm] = useState(initial || {
     aptId: apts[0]?.id || "", guest:"", phone:"", checkin:"", checkout:"",
-    source:"Airbnb", payment:"Airbnb", price:"", status:"Confirmée", guests:"", notes:""
+    source:"Airbnb", payment:"Airbnb", price:"", deposit:"", status:"Confirmée", guests:"", notes:""
   });
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
   const handleSourceChange = (source) => {
@@ -475,6 +485,19 @@ function ReservationForm({ apts, onSubmit, initial, onCancel }) {
         <Field label="Prix total (€)">
           <input type="number" value={form.price} onChange={e => set("price", e.target.value)} style={inputStyle} placeholder="Ex: 250" />
         </Field>
+        <Field label="Acompte reçu (€)">
+          <input type="number" value={form.deposit} onChange={e => set("deposit", e.target.value)} style={inputStyle} placeholder="Ex: 100" />
+        </Field>
+        {Number(form.price) > 0 && (
+          <Field label="Reste à payer" full>
+            <div style={{ padding:"10px 12px", borderRadius:8, fontSize:14, fontWeight:700,
+              background: (Number(form.price) - Number(form.deposit || 0)) <= 0 ? "#f0fdf4" : "#fef3f2",
+              color: (Number(form.price) - Number(form.deposit || 0)) <= 0 ? "#16a34a" : "#dc2626"
+            }}>
+              {(Number(form.price) - Number(form.deposit || 0)) <= 0 ? "✅ Tout est payé" : `⚠️ ${(Number(form.price) - Number(form.deposit || 0)).toLocaleString("fr-FR")} € restant`}
+            </div>
+          </Field>
+        )}
         <Field label="Statut">
           <select value={form.status} onChange={e => set("status", e.target.value)} style={inputStyle}>
             {STATUSES.map(s => <option key={s}>{s}</option>)}
